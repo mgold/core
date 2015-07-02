@@ -6,6 +6,7 @@ module Graphics.Collage
     , Shape, rect, oval, square, circle, ngon, polygon
     , Path, segment, path
     , solid, dashed, dotted, LineStyle, LineCap(..), LineJoin(..), defaultLine
+    , backbuffer, Backbuffer, getAt
     ) where
 
 {-| The collage API is for freeform graphics. You can move, rotate, scale, etc.
@@ -47,6 +48,7 @@ import Basics exposing (..)
 import List
 import Transform2D exposing (Transform2D)
 import Transform2D as T
+import Maybe exposing (Maybe)
 import Native.Graphics.Collage
 import Graphics.Element exposing (Element)
 import Color exposing (Color, black, Gradient)
@@ -360,3 +362,39 @@ is taken from the `LineStyle` attribute instead of the `Text`.
 outlinedText : LineStyle -> Text -> Form
 outlinedText ls t =
   form (FOutlinedText ls t)
+
+colorFor : Int -> Color
+colorFor i = Color.rgb 1 (i // 256) (i % 256) -- works for up to 65536 forms
+
+numberForm : Int -> Form -> Form
+numberForm i frm =
+    let clr = colorFor i
+        base = case frm.form of
+            FPath lStyle pairs -> FPath {lStyle| color <- clr} pairs
+            FShape sStyle pairs -> case sStyle of
+                                        Line lStyle -> FShape (Line {lStyle| color <- clr}) pairs
+                                        Fill lStyle -> FShape (Fill (Solid clr)) pairs
+            FOutlinedText lStyle txt -> FOutlinedText {lStyle| color <- clr} txt
+            FText txt -> FText (Text.color clr txt)
+            FImage w h _ _ -> rect (toFloat w) (toFloat h) |> filled clr |> .form
+            FElement elem -> rect (toFloat <| Graphics.Element.widthOf elem) (toFloat <| Graphics.Element.heightOf elem)
+                                |> filled clr |> .form
+            FGroup trans frms -> FGroup trans (List.map (numberForm i) frms)
+    in {frm| alpha <- 1, form <- base}
+
+
+{-| Create a backbuffer used for mouse detection. You should pass the same arguments that you do to `collage`.
+-}
+backbuffer : Int -> Int -> List Form -> Backbuffer
+backbuffer w h frms =
+    B <| collage w h <| List.indexedMap numberForm frms
+
+{-| Determine which form (if any) is underneath the mouse, identified by index in the array that created that
+backbuffer. Note that the point is in mouse coordinates, with the origin at the top-left of the collage.
+-}
+getAt : (Int, Int) -> Backbuffer -> Maybe Int
+getAt = Native.Graphics.Collage.getAt
+
+{-| The opaque type of the backbuffer.
+-}
+type Backbuffer = B Element

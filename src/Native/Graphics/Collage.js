@@ -653,8 +653,22 @@ Elm.Native.Graphics.Collage.make = function(localRuntime) {
 		});
 	}
 
+	function getAt(pair, bbuf)
+	{
+		var canvas = bbuf._0.element.render(bbuf._0.element.model).children[0];
+		var context = canvas.getContext('2d');
+		var rgba = context.getImageData(pair._0, pair._1, 1, 1).data;
+		if (rgba[0] === 0)
+		{
+			return {ctor: "Nothing"}
+		}else{
+			return {ctor: "Just", _0: rgba[1]*256 + rgba[2]}
+		}
+	}
+
 	return localRuntime.Native.Graphics.Collage.values = {
-		collage: F3(collage)
+		collage: F3(collage),
+		getAt: F2(getAt)
 	};
 
 };
