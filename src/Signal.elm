@@ -6,8 +6,8 @@ module Signal
     , constant
     , dropRepeats, filter, filterMap, sampleOn
     , foldp
-    , Mailbox, Address, Message
-    , mailbox, send, message, forwardTo
+    , Dispatcher, Message
+    , dispatcher, send
     ) where
 
 {-| A *signal* is a value that changes over time. For example, we can
@@ -300,93 +300,63 @@ infixl 4 ~
 
 -- MAILBOXES
 
-{-| An `Mailbox` is a communication hub. It is made up of
 
-  * an `Address` that you can send messages to
-  * a `Signal` of messages sent to the mailbox
+{-| An Dispatcher is a communication hub, used to receive updates from Tasks and
+UI elements. It consists of
+
+  * a signal of values that you can use in your program
+  * a `dispatch` function that takes a value and creates a Message (more on that
+    in a bit)
 -}
-type alias Mailbox a =
-    { address : Address a
-    , signal : Signal a
+type alias Dispatcher a =
+    { signal : Signal a
+    , dispatch : a -> Message
     }
 
 
-{-| An `Address` points to a specific signal. It allows you to feed values into
-signals, so you can provide your own signal updates.
+{-| Create a dispatcher, using the argument as the default value for the new
+signal.
 
-The primary use case is when a `Task` or UI element needs to talk back to the
-main part of your application.
+Note: Creating new signals is inherently impure, so `dispatcher ()` and
+`dispatcher ()` produce two different dispatchers.
 -}
-type Address a =
-    Address (a -> Task () ())
-
-
-
-{-| Create a mailbox you can send messages to. The primary use case is
-receiving updates from tasks and UI elements. The argument is a default value
-for the custom signal.
-
-Note: Creating new signals is inherently impure, so `(mailbox ())` and
-`(mailbox ())` produce two different mailboxes.
--}
-mailbox : a -> Mailbox a
-mailbox =
+dispatcher : a -> Dispatcher a
+dispatcher =
   Native.Signal.mailbox
+  -- TODO rename
 
+{-| Messages are similar to Tasks, in that the define some effect that can be
+run later. However, Tasks can do any effect, but Messages can only cause the
+dispatcher to send the Message's value on its signal.
 
-{-| Create a new address. This address will tag each message it receives
-and then forward it along to some other address.
+Messages can be sent multiple times. Many UI libraries take Messages to send
+whenever something happens (say, a button click). Sometimes they take a function
+from the UI state to a message, and you can compose whatever transformations you
+need with `dispatch`.
 
-    type Action = Undo | Remove Int
+    type Action = Undo | NoOp | ...
+    actions = dispatcher NoOp
+    undoButton = Graphics.Input.button (actions.dispatch Undo) "Undo"
 
-    port actions : Mailbox Action
-
-    removeAddress : Address Int
-    removeAddress =
-        forwardTo actions.address Remove
-
-In this case we have a general `address` that many people may send
-messages to. The new `removeAddress` tags all messages with the `Remove` tag
-before forwarding them along to the more general `address`. This means
-some parts of our application can know *only* about `removeAddress` and not
-care what other kinds of `Actions` are possible.
--}
-forwardTo : Address b -> (a -> b) -> Address a
-forwardTo (Address send) f =
-    Address (\x -> send (f x))
-
-
-{-| A `Message` is like an envelope that you have not yet put in a mailbox.
-The address is filled out and the envelope is filled, but it will be sent at
-some point in the future.
+This creates an undo button that will send the `Undo` action on `actions.signal` whenever the button is clicked.
 -}
 type Message = Message (Task () ())
 
 
-{-| Create a message that may be sent to a `Mailbox` at a later time.
+{-| If you're not using a UI library, the other way to send a Message is to turn
+it into a Task and then send it out a port. If you need the result of a Task
+(say, an HTTP response) to be sent back into your program, use this method with
+`Task.andThen`.
 
-Most importantly, this lets us create APIs that can send values to ports
-*without* allowing people to run arbitrary tasks.
+    dispatcher : Dispatcher Maybe (Result Http.Error String)
+    dispatcher = dispatcher Nothing
+
+    port requests : Task () ()
+    port requests =
+      Http.getString "example.com"
+        |> Task.toResult |> Task.map Just
+        |> (flip Task.andThen) (send dispatcher.address)
+
 -}
-message : Address a -> a -> Message
-message (Address send) value =
-    Message (send value)
-
-
-{-| Send a message to an `Address`.
-
-    type Action = Undo | Remove Int
-
-    address : Address Action
-
-    requestUndo : Task x ()
-    requestUndo =
-        send address Undo
-
-The `Signal` associated with `address` will receive the `Undo` message
-and push it through the Elm program.
--}
-send : Address a -> a -> Task x ()
-send (Address actuallySend) value =
-    actuallySend value
-      `onError` \_ -> succeed ()
+send : Message -> Task () ()
+send (Message task) = task
