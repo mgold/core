@@ -3,7 +3,7 @@ module Random
     , bool, int, float
     , list, pair
     , map, map2, map3, map4, map5
-    , andThen
+    , constant, andThen
     , minInt, maxInt
     , generate, initialSeed
     )
@@ -35,7 +35,7 @@ module. It has a period of roughly 2.30584e18.
 @docs pair, list
 
 # Custom Generators
-@docs map, map2, map3, map4, map5, andThen
+@docs constant, map, map2, map3, map4, map5, andThen
 
 # Run a Generator
 @docs generate, Seed, initialSeed
@@ -196,6 +196,15 @@ listHelp list n generate seed =
       listHelp (value :: list) (n-1) generate newSeed
 
 
+{-| Create a generator that always produces the value provided. This is useful
+when creating complicated chained generators and you need to handle a simple
+case.
+-}
+constant : a -> Generator a
+constant value =
+  Generator (\seed -> (value, seed))
+
+
 {-| Transform the values produced by a generator. The following examples show
 how to generate booleans and letters based on a basic integer generator.
 
@@ -328,7 +337,6 @@ functions like [`generate`](#generate) and [`initialSeed`](#initialSeed).
 -}
 type Generator a =
     Generator (Seed -> (a, Seed))
-
 
 type State = State Int Int
 
