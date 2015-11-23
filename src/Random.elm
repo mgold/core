@@ -16,9 +16,10 @@ type of values you need. There are a bunch of primitive generators like
 [`bool`](#bool) and [`int`](#int) that you can build up into fancier
 generators with functions like [`list`](#list) and [`map`](#map).
 
-You use a `Generator` by running the [`generate`](#generate) function. If you
-need random values across many frames, you will probably want to store the
-most recent seed in your application state.
+You use a `Generator` by running the [`generate`](#generate) function, which
+also takes a random seed, and passes back a new seed. You should never use the
+same seed twice because you will get the same result! If you need random values
+across many frames, you should store the most recent seed in your model.
 
 *Note:* This is an implementation of the Portable Combined Generator of
 L'Ecuyer for 32-bit computers. It is almost a direct translation from the
@@ -272,6 +273,12 @@ map3 func (Generator genA) (Generator genB) (Generator genC) =
 
 
 {-| Combine four generators.
+
+    import Color
+
+    rgba : Generator Color.Color
+    rgba =
+      map4 Color.rgb (int 0 255) (int 0 255) (int 0 255) (float 0 1)
 -}
 map4 : (a -> b -> c -> d -> e) -> Generator a -> Generator b -> Generator c -> Generator d -> Generator e
 map4 func (Generator genA) (Generator genB) (Generator genC) (Generator genD) =
@@ -338,7 +345,8 @@ type Generator a =
 
 
 {-| A `Seed` is the source of randomness in this whole system. Whenever
-you want to use a generator, you need to pair it with a seed.
+you want to use a generator, you need to supply a seed. You will get back a new
+seed, which you must use to generate new random numbers.
 -}
 type Seed = Seed Int Int
 
@@ -373,8 +381,19 @@ generate (Generator generator) seed =
 
 {-| Create a &ldquo;seed&rdquo; of randomness which makes it possible to
 generate random values. If you use the same seed many times, it will result
-in the same thing every time! A good way to get an unexpected seed is to use
-the current time.
+in the same thing every time!
+
+You should call this function only once in your entire program. If you call it
+on sequential numbers (like the current time over a few seconds), each seed will
+generate nearly-identical results. To obtain a good starting seed value, run
+`Math.floor(Math.random()*0xFFFFFFFF)` in a JavaScript console. If you want each
+run of your program to be unique, you can pass this value in through a port.
+
+    -- DON'T DO THIS: it generates `True` ten times!
+    List.map (\i -> generate bool (initialSeed i) |> fst) [0..10]
+
+    -- DO THIS INSTEAD: it generates a reasonable list, and keeps the new seed.
+    (bools, newSeed) = generate (list 10 bool) (initialSeed 999999999)
 -}
 initialSeed : Int -> Seed
 initialSeed s' =
