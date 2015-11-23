@@ -5,7 +5,7 @@ module Random
     , map, map2, map3, map4, map5
     , constant, andThen
     , minInt, maxInt
-    , generate, initialSeed
+    , generate, initialSeed, split
     )
   where
 
@@ -38,7 +38,7 @@ module. It has a period of roughly 2.30584e18.
 @docs constant, map, map2, map3, map4, map5, andThen
 
 # Run a Generator
-@docs generate, Seed, initialSeed
+@docs generate, Seed, initialSeed, split
 
 # Constants
 @docs maxInt, minInt
@@ -75,7 +75,7 @@ This function *can* produce values outside of the range [[`minInt`](#minInt),
 -}
 int : Int -> Int -> Generator Int
 int a b =
-  Generator <| \(Seed seed) ->
+  Generator <| \seed0 ->
     let
       (lo,hi) =
         if a < b then (a,b) else (b,a)
@@ -85,21 +85,19 @@ int a b =
       base = 2147483561
       n = iLogBase base k
 
-      f n acc state =
-        case n of
-          0 -> (acc, state)
-          _ ->
-            let
-              (x, state') = seed.next state
-            in
-              f (n - 1) (x + acc * base) state'
+      f n acc seed =
+        if n == 0
+        then (acc, seed)
+        else
+          let
+            (x, seed') = next seed
+          in
+            f (n - 1) (x + acc * base) seed'
 
-      (v, state') =
-        f n 1 seed.state
+      (v, seed1) =
+        f n 1 seed0
     in
-      ( lo + v % k
-      , Seed { seed | state = state' }
-      )
+      ( lo + v % k , seed1)
 
 
 iLogBase : Int -> Int -> Int
@@ -338,18 +336,11 @@ functions like [`generate`](#generate) and [`initialSeed`](#initialSeed).
 type Generator a =
     Generator (Seed -> (a, Seed))
 
-type State = State Int Int
-
 
 {-| A `Seed` is the source of randomness in this whole system. Whenever
 you want to use a generator, you need to pair it with a seed.
 -}
-type Seed = Seed
-    { state : State
-    , next  : State -> (Int, State)
-    , split : State -> (State, State)
-    , range : State -> (Int,Int)
-    }
+type Seed = Seed Int Int
 
 
 {-| Generate a random value as specified by a given `Generator`.
@@ -386,22 +377,14 @@ in the same thing every time! A good way to get an unexpected seed is to use
 the current time.
 -}
 initialSeed : Int -> Seed
-initialSeed n =
-    Seed { state = initState n, next = next, split = split, range = range }
-
-
-{-| Produce the initial generator state. Distinct arguments should be likely
-to produce distinct generator states.
--}
-initState : Int -> State
-initState s' =
+initialSeed s' =
   let
-    s = max s' -s'
+    s = abs s'
     q  = s // (magicNum6-1)
     s1 = s %  (magicNum6-1)
     s2 = q %  (magicNum7-1)
   in
-    State (s1+1) (s2+1)
+    Seed (s1+1) (s2+1)
 
 
 magicNum0 = 40014
@@ -415,8 +398,8 @@ magicNum7 = 2137383399
 magicNum8 = 2147483562
 
 
-next : State -> (Int, State)
-next (State s1 s2) =
+next : Seed -> (Int, Seed)
+next (Seed s1 s2) =
   -- Div always rounds down and so random numbers are biased
   -- ideally we would use division that rounds towards zero so
   -- that in the negative case it rounds up and in the positive case
@@ -432,11 +415,31 @@ next (State s1 s2) =
     z = s1'' - s2''
     z' = if z < 1 then z + magicNum8 else z
   in
-    (z', State s1'' s2'')
+    (z', Seed s1'' s2'')
 
+{-| Split a seed into two new seeds. Each seed will generate different random
+numbers.
 
-split : State -> (State, State)
-split (State s1 s2 as std) =
+Let's say you have have many independent components which will each want to
+generate many random numbers. After splitting a seed, you can pass one of the
+new seeds to a component, and keep the other to repeat the process.
+
+    makeComponents : Seed -> List (Seed -> Component) -> (List Component, Seed)
+    makeComponents seed constructors =
+      case constructors of
+        [] ->
+          ([], seed)
+
+        c::cs ->
+          let
+            (seed1, seed2) = split seed
+            (tail, seed3) = makeComponents seed2 cs
+          in
+            (c seed1 :: tail, seed3)
+
+-}
+split : Seed -> (Seed, Seed)
+split (Seed s1 s2 as std) =
   let
     new_s1 =
       if s1 == magicNum6-1 then 1 else s1 + 1
@@ -444,12 +447,7 @@ split (State s1 s2 as std) =
     new_s2 =
       if s2 == 1 then magicNum7-1 else s2 - 1
 
-    (State t1 t2) =
+    (Seed t1 t2) =
       snd (next std)
   in
-    (State new_s1 t2, State t1 new_s2)
-
-
-range : State -> (Int,Int)
-range _ =
-    (0, magicNum8)
+    (Seed new_s1 t2, Seed t1 new_s2)
