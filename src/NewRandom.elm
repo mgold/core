@@ -1,4 +1,4 @@
-effect module Random where { command = MyCmd } exposing
+effect module NewRandom where { command = MyCmd } exposing
   ( Generator, Seed
   , bool, int, float
   , list, pair

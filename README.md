@@ -1,34 +1,9 @@
-# Elm Core Libraries
+# Benchmark tests for submitting PCG to core
 
-[![Build Status](https://travis-ci.org/elm-lang/core.svg?branch=master)](https://travis-ci.org/elm-lang/core)
+Clone the `mgold/core` fork locally and check out this branch, `random-pcg-tests`.
 
-Every Elm project needs the core libraries. They provide basic functionality including:
+Then run `elm-reactor`.
 
-  * The Basics &mdash; addition, subtraction, etc.
-  * Data Structures &mdash; lists, dictionaries, sets, etc.
+In the browser, navigate to `benchmark/index.html`. The tests will start running.
 
-
-## Default Imports
-
-All Elm files have some default imports:
-
-```elm
-import Basics exposing (..)
-import List exposing ( List, (::) )
-import Maybe exposing ( Maybe( Just, Nothing ) )
-import Result exposing ( Result( Ok, Err ) )
-import String
-import Tuple
-
-import Debug
-
-import Platform exposing ( Program )
-import Platform.Cmd exposing ( Cmd, (!) )
-import Platform.Sub exposing ( Sub )
-```
-
-The intention is to include things that are both extremely useful and very
-unlikely to overlap with anything that anyone will ever write in a library.
-By keeping the set of default imports small, it also becomes easier to use
-whatever version of `map` suits your fancy. Finally, it makes it easier to
-figure out where the heck a function is coming from.
+(If you change anything, you need to run `make` in the `benchmark` directory to recompile.)
