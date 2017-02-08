@@ -1,205 +1,346 @@
-effect module Benchmark
-    where { subscription = MySub }
+module Benchmark
     exposing
-        ( Bench
-        , Suite
-        , Event(..)
-        , Result
-        , ErrorInfo
-        , Stats
-        , bench
-        , suite
-        , suiteWithOptions
-        , runTask
-        , events
-        , defaultOptions
-        , getStats
+        ( Benchmark
+        , withRuntime
+        , withRuns
+        , describe
+        , benchmark
+        , benchmark1
+        , benchmark2
+        , benchmark3
+        , benchmark4
+        , benchmark5
+        , benchmark6
+        , benchmark7
+        , benchmark8
+        , compare
+        , nextTask
         )
 
-{-|
-Run timing benchmarks using benchmark.js
+{-| Benchmark Elm Programs
 
-# Types
-@docs Bench, Suite, Event, Result, ErrorInfo, Stats
+Benchmarks represent a runnable operation.
 
-# Functions
-@docs bench, suite, suiteWithOptions, runTask, events, defaultOptions, getStats
+@docs Benchmark
+
+# Creating Benchmarks
+@docs benchmark, benchmark1, benchmark2, benchmark3, benchmark4, benchmark5, benchmark6, benchmark7, benchmark8, describe, compare
+
+# Sizing
+@docs withRuntime, withRuns
+
+# Running
+@docs nextTask
 -}
 
-import Native.Benchmark
-import Process
+import Benchmark.Internal as Internal
+import Benchmark.LowLevel as LowLevel exposing (Error(..), Operation)
+import Benchmark.Stats as Stats exposing (Stats)
+import List.Extra as List
 import Task exposing (Task)
-import Benchmark.Stats as Stats
+import Time exposing (Time)
 
 
-{-| Opaque type for the return from `bench`, representing a single benchmark
-(function and name).
+-- Benchmarks and Suites
+
+
+{-| Benchmarks that contain potential, in-progress, and completed runs.
+
+To make these, try [`benchmark`](#benchmark), [`describe`](#describe), or
+[`compare`](#compare)
 -}
-type Bench
-    = Bench
+type alias Benchmark =
+    Internal.Benchmark
 
 
-{-| Opaque type for the turn from `suite`, represent a named list of `Bench`
-values.
+{-| Set the expected runtime for a [`Benchmark`](#Benchmark). This is the
+default method of determining benchmark run size.
+
+For example, to set the expected runtime to 1 second (away from the default of 5
+seconds):
+
+    benchmark1 "list head" List.head [1] |> withRuntime Time.second
+
+This works with all the kinds of benchmarks you can create. If you provide a
+composite benchmark (a group or comparison) the same expected runtime will be
+set for all members.
+
+Note that this sets the *expected* runtime, not *actual* runtime. We take a
+small number of samples, then extrapolate to fit. This means that the actual
+benchmarking runs will not fit *exactly* within the given time, but we should be
+fairly close. In practice, expect actual runtime to deviate up to about 30%.
+However, these actual runtimes should be fairly consistent between runs. NB:
+Larger expected runtimes tend to yield more accurate actual runtimes.
 -}
-type Suite
-    = Suite
+withRuntime : Time -> Benchmark -> Benchmark
+withRuntime time benchmark =
+    case benchmark of
+        Internal.Benchmark name sample _ ->
+            Internal.Benchmark name sample <| Internal.ToSize time
+
+        Internal.Group name benchmarks ->
+            Internal.Group name <| List.map (withRuntime time) benchmarks
+
+        Internal.Compare name a b ->
+            Internal.Compare name
+                (withRuntime time a)
+                (withRuntime time b)
 
 
-type alias Name =
-    String
+{-| Set the exact number of runs to benchmarked. For example, to run a function
+1 million times:
 
+    benchmark1 "list head" List.head [1] |> withRuns 1000000
 
-{-| The sample times resulting from benchmarking a single function of a suite.
+Doing this is generally not necessary; the runtime-based estimator will provide
+consistent and reasonable results for all sizes of benchmarks without you having
+to account for benchmark size or environmental concerns.
 -}
-type alias Result =
-    { suite : Name
-    , benchmark : Name
-    , samples : List Float
-    }
+withRuns : Int -> Benchmark -> Benchmark
+withRuns n benchmark =
+    case benchmark of
+        Internal.Benchmark name sample _ ->
+            Internal.Benchmark name sample <| Internal.Pending n
+
+        Internal.Group name benchmarks ->
+            Internal.Group name <| List.map (withRuns n) benchmarks
+
+        Internal.Compare name a b ->
+            Internal.Compare name
+                (withRuns n a)
+                (withRuns n b)
 
 
-{-| Information about an error reported by benchmark.js when benchmarking a
-single function of a suite.
+
+-- Creation
+
+
+{-| Group a number of benchmarks together. Grouping benchmarks using `describe`
+will never effect measurement, only organization.
+
+You'll typically have at least one call to this in your benchmark program, at
+the top level:
+
+    describe "your program"
+        [ -- all your benchmarks
+        ]
 -}
-type alias ErrorInfo =
-    { suite : Name, benchmark : Name, message : String }
+describe : String -> List Benchmark -> Benchmark
+describe =
+    Internal.Group
 
 
-{-| Benchmarking events returned via subscription to `events`
+{-| Benchmark a function.
+
+The first argument to the benchmark* functions is the name of the thing you're
+measuring.
+
+    benchmark "list head" (\_ -> List.head [1])
+
+`benchmark1` through `benchmark8` have a nicer API which doesn't force you to
+define anonymous functions. For example, the benchmark above can be defined as:
+
+    benchmark1 "list head" List.head [1]
 -}
-type Event
-    = Start { suite : Name, platform : String }
-    | Cycle Result
-    | Complete { suite : Name }
-    | Finished
-    | BenchError ErrorInfo
+benchmark : String -> (() -> a) -> Benchmark
+benchmark name fn =
+    Internal.benchmark name (LowLevel.operation fn)
 
 
-type alias Options =
-    { maxTime : Int
-    , minTime : Int
-    }
+{-| Benchmark a function with a single argument.
 
+    benchmark1 "list head" List.head [1]
 
-{-| Default `Options` value
+See the docs for [`benchmark`](#benchmark) for why this exists.
 -}
-defaultOptions : Options
-defaultOptions =
-    { maxTime = 5, minTime = 0 }
+benchmark1 : String -> (a -> b) -> a -> Benchmark
+benchmark1 name fn a =
+    Internal.benchmark name (LowLevel.operation1 fn a)
 
 
-{-| Create a `Bench` value from the given benchmark name and function.
+{-| Benchmark a function with two arguments.
+
+    benchmark2 "dict get" Dict.get "a" (Dict.singleton "a" 1)
+
+See the docs for [`benchmark`](#benchmark) for why this exists.
 -}
-bench : Name -> (() -> a) -> Bench
-bench =
-    Native.Benchmark.bench
+benchmark2 : String -> (a -> b -> c) -> a -> b -> Benchmark
+benchmark2 name fn a b =
+    Internal.benchmark name (LowLevel.operation2 fn a b)
 
 
-{-| Create a `Suite` with given set of options.
+{-| Benchmark a function with three arguments.
+
+    benchmark3 "dict insert" Dict.insert "b" 2 (Dict.singleton "a" 1)
+
+See the docs for [`benchmark`](#benchmark) for why this exists.
 -}
-suiteWithOptions : Options -> Name -> List Bench -> Suite
-suiteWithOptions =
-    Native.Benchmark.suite
+benchmark3 : String -> (a -> b -> c -> d) -> a -> b -> c -> Benchmark
+benchmark3 name fn a b c =
+    Internal.benchmark name (LowLevel.operation3 fn a b c)
 
 
-{-| Create a `Suite` from the name and list of benchmarks.
+{-| Benchmark a function with four arguments.
+
+See the docs for [`benchmark`](#benchmark) for why this exists.
 -}
-suite : Name -> List Bench -> Suite
-suite =
-    suiteWithOptions defaultOptions
+benchmark4 : String -> (a -> b -> c -> d -> e) -> a -> b -> c -> d -> Benchmark
+benchmark4 name fn a b c d =
+    Internal.benchmark name (LowLevel.operation4 fn a b c d)
 
 
-{-| Create a Task from the list of suites.
+{-| Benchmark a function with five arguments.
+
+See the docs for [`benchmark`](#benchmark) for why this exists.
 -}
-runTask : List Suite -> Task Never ()
-runTask =
-    Native.Benchmark.runTask
+benchmark5 : String -> (a -> b -> c -> d -> e -> f) -> a -> b -> c -> d -> e -> Benchmark
+benchmark5 name fn a b c d e =
+    Internal.benchmark name (LowLevel.operation5 fn a b c d e)
 
 
-{-| Subscription to benchmark events.
+{-| Benchmark a function with six arguments.
+
+See the docs for [`benchmark`](#benchmark) for why this exists.
 -}
-events : (Event -> msg) -> Sub msg
-events tagger =
-    subscription (Tagger tagger)
+benchmark6 : String -> (a -> b -> c -> d -> e -> f -> g) -> a -> b -> c -> d -> e -> f -> Benchmark
+benchmark6 name fn a b c d e f =
+    Internal.benchmark name (LowLevel.operation6 fn a b c d e f)
 
 
-{-| Internal task used by this effect manager to watch for events generated from
-the benchmark.js code and wrapper.
+{-| Benchmark a function with seven arguments.
+
+See the docs for [`benchmark`](#benchmark) for why this exists.
 -}
-watch : (Event -> Task Never ()) -> Task x Never
-watch =
-    Native.Benchmark.watch
+benchmark7 : String -> (a -> b -> c -> d -> e -> f -> g -> h) -> a -> b -> c -> d -> e -> f -> g -> Benchmark
+benchmark7 name fn a b c d e f g =
+    Internal.benchmark name (LowLevel.operation7 fn a b c d e f g)
 
 
-{-| Statistics over a set of sample times.
+{-| Benchmark a function with eight arguments.
+
+See the docs for [`benchmark`](#benchmark) for why this exists.
 -}
-type alias Stats =
-    Stats.Stats
+benchmark8 : String -> (a -> b -> c -> d -> e -> f -> g -> h -> i) -> a -> b -> c -> d -> e -> f -> g -> h -> Benchmark
+benchmark8 name fn a b c d e f g h =
+    Internal.benchmark name (LowLevel.operation8 fn a b c d e f g h)
 
 
-{-| Calculate statistics for the list of sample time values
+{-| Specify that two benchmarks are meant to be directly compared.
+
+As with [`benchmark`](#benchmark), the first argument is the name for the
+comparison.
+
+    compare "initialize"
+        (benchmark2 "HAMT" HAMT.initialize 10000 identity)
+        (benchmark2 "Core" Array.initialize 10000 identity)
 -}
-getStats : List Float -> Stats
-getStats =
-    Stats.getStats
+compare : String -> Benchmark -> Benchmark -> Benchmark
+compare =
+    Internal.Compare
 
 
 
--- effect manager machinery
+-- Runners
 
 
-type MySub msg
-    = Tagger (Event -> msg)
+mapFirst : (a -> Maybe b) -> List a -> Maybe b
+mapFirst fn list =
+    case list of
+        [] ->
+            Nothing
+
+        first :: rest ->
+            case fn first of
+                Just thing ->
+                    Just thing
+
+                Nothing ->
+                    mapFirst fn rest
 
 
-type alias State msg =
-    Maybe
-        { subs : List (MySub msg)
-        , watcher : Process.Id
-        }
+{-| Get the next benchmarking task. This is only useful for writing runners. Try
+using `Benchmark.Runner.program` instead.
+-}
+nextTask : Benchmark -> Maybe (Task Never Benchmark)
+nextTask benchmark =
+    case benchmark of
+        Internal.Benchmark name sample status ->
+            case status of
+                Internal.ToSize time ->
+                    timebox time sample
+                        |> Task.map (Internal.Pending >> Internal.Benchmark name sample)
+                        |> Task.onError (Err >> Internal.Complete >> Internal.Benchmark name sample >> Task.succeed)
+                        |> Just
 
+                Internal.Pending n ->
+                    LowLevel.sample n sample
+                        |> Task.map (Stats.stats n >> Ok >> Internal.Complete >> Internal.Benchmark name sample)
+                        |> Task.onError (Err >> Internal.Complete >> Internal.Benchmark name sample >> Task.succeed)
+                        |> Just
 
-subMap : (a -> b) -> MySub a -> MySub b
-subMap func (Tagger tagger) =
-    Tagger (tagger >> func)
+                _ ->
+                    Nothing
 
-
-init : Task Never (State msg)
-init =
-    Task.succeed Nothing
-
-
-onEffects : Platform.Router msg Event -> List (MySub msg) -> State msg -> Task Never (State msg)
-onEffects router subs state =
-    case ( state, subs ) of
-        ( Nothing, [] ) ->
-            Task.succeed Nothing
-
-        ( Just { watcher }, [] ) ->
-            Process.kill watcher |> Task.andThen (\_ -> Task.succeed Nothing)
-
-        ( Nothing, _ ) ->
-            Process.spawn (watch (Platform.sendToSelf router))
-                |> Task.andThen
-                    (\watcher ->
-                        Task.succeed (Just { subs = subs, watcher = watcher })
+        Internal.Group name benchmarks ->
+            benchmarks
+                |> List.indexedMap (,)
+                |> mapFirst
+                    (\( i, benchmark ) ->
+                        nextTask benchmark
+                            |> Maybe.map ((,) i)
+                    )
+                |> Maybe.map
+                    (\( i, task ) ->
+                        task
+                            |> Task.map (\benchmark -> List.setAt i benchmark benchmarks)
+                            |> Task.map (Maybe.map (Internal.Group name))
+                            |> Task.map (Maybe.withDefault benchmark)
                     )
 
-        ( Just { watcher }, _ ) ->
-            Task.succeed (Just { subs = subs, watcher = watcher })
-
-
-onSelfMsg : Platform.Router msg Event -> Event -> State msg -> Task Never (State msg)
-onSelfMsg router event state =
-    case state of
-        Nothing ->
-            Task.succeed Nothing
-
-        Just { subs } ->
+        Internal.Compare name a b ->
             let
-                send (Tagger tagger) =
-                    Platform.sendToApp router (tagger event)
+                taska =
+                    nextTask a |> Maybe.map (Task.map (\a -> Internal.Compare name a b))
+
+                taskb =
+                    nextTask b |> Maybe.map (Task.map (Internal.Compare name a))
             in
-                Task.sequence (List.map send subs)
-                    |> Task.andThen (\_ -> Task.succeed state)
+                case taska of
+                    Just _ ->
+                        taska
+
+                    Nothing ->
+                        taskb
+
+
+{-| Fit as many runs as possible into a Time.
+-}
+timebox : Time -> Operation -> Task Error Int
+timebox box operation =
+    let
+        initialSampleSize =
+            100
+
+        minimumRuntime =
+            max
+                (box * 0.05)
+                Time.millisecond
+
+        sample : Int -> Task Error Time
+        sample size =
+            LowLevel.sample size operation
+                |> Task.andThen (resample size)
+
+        -- increase the sample size by powers of 10 until we meet the minimum runtime
+        resample : Int -> Time -> Task Error Time
+        resample size total =
+            if total < minimumRuntime then
+                sample (size * 10)
+            else
+                total / toFloat size |> Task.succeed
+
+        fit : Time -> Int
+        fit single =
+            box / single * 1.3 |> ceiling
+    in
+        sample initialSampleSize |> Task.map fit

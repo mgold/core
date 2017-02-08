@@ -3,11 +3,9 @@
 ## Performance benchmarks
 Clone the `mgold/core` fork locally and check out this branch, `random-pcg-tests`.
 
-`cd benchmark`, then run `make`, then `cd ..` out.
+`cd benchmark`, then run `elm-reactor`.
 
-Then run `elm-reactor`.
-
-In the browser, navigate to `benchmark/index.html`. The tests will start running.
+In the browser, navigate to `Main.elm`. The tests will start running.
 
 ## Randomness tests
 This is done with Dieharder (`brew install dieharder`). Unfortunately it needs a
